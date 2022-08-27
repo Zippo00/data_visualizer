@@ -1,0 +1,658 @@
+'''
+Ohjelmassa on graafinen käyttöliittymä, josta käyttäjä voi valita ohjelman eri toiminnot.
+
+Ensimmäinen toiminto lataa datan tiedostoista ohjelman muistiin. Aliohjelma etsii käyttäjän
+valitsemasta kansiosta tiedostoja, joiden nimi on .txt muotoa ja lukee niissä olevan
+datan. Aliohjelma luo ohjelmaan muistiin sanakirjan, jossa avaimina ovat mitatut
+kineettiset energiat ja avainta vastaavana arvona summa mitatusta intensiteetispektristä. (Eli
+jokaista yksittäistä energiaa vastaavat intensiteetit eri mittauksista on laskettu yhteen.)
+Lopuksi aliohjelma ilmoittaa käyttäjälle montako tiedostoa ladattiin.
+
+Toinen toiminto piirtää sen hetkisen ohjelman muistissa löytyvän datan näkyviin. Mikäli mitään
+dataa ei ole ladattu, tästä ilmoitetaan käyttäjälle. Data piirretään näkyviin
+käyttämällä matplotlib-kirjastoa, ja käyttöliittymään upotettua kuvaajaa sekä piirtoaluetta.
+
+Kolmas toiminto poistaa spektristä lineaarisen taustan. Mikäli mitään dataa ei ole ladattu
+ohjelman muistiin, ilmoitetaan tästä käyttäjälle. Käyttäjä valitsee kaksi pistettä klikkaamalla
+niitä kuvaajasta, ja ohjelma sovittaa näihin pisteisiin suoran sekä vähentää ohjelman muistissa
+olevasta spektristä taustan.
+
+Neljäs toiminto laskee spektristä löytyvien piikkien intensiteetit. Mikäli mitään dataa ei ole
+ladattu ohjelman muistiin, ilmoitetaan tästä käyttäjälle. Integrointi tehdään käyttämällä
+puolisuunnikassääntöä. Käyttäjä valitsee energiavälin klikkaamalla kuvaajasta. Tämän jälkeen
+ohjelma laskee piikin pinta-alan ja ilmoittaa sen käyttäjälle.
+
+Viides toiminto antaa käyttäjän tallentaa kuvaajan ohjelman muistissa sillä hetkellä olevasta
+datasta. Mikäli mitään dataa ei ole ladattu ohjelman muistiin, ilmoitetaan tästä käyttäjälle.
+Aliohjelma kysyy käyttäjältä tiedostonnimen, jolla tämä haluaa kuvaajan tallentaa. Sen jälkeen
+aliohjelma tallentaa käyttäjän antamalla nimellä samanlaisen kuvaajan kuin mitä toisessa
+aliohjelmassa piirretään näkyviin. Kuvaajat voi tallentaa .png-muodossa.
+
+
+
+Tarvitut kirjastot: numpy, matplotlib, ikkunasto
+
+
+
+Created by Mikko Lempinen
+'''
+import tkinter as tk
+from tkinter.ttk import Separator
+import os
+import traceback
+import numpy as np
+from matplotlib import pyplot as plt
+import ikkunasto as ik
+
+
+
+ohjelman_muisti = {
+}
+
+ohjelman_muisti_2 = {
+}
+
+elementit = {
+    "tekstilaatikko": None,
+}
+
+def kirjoita_tekstilaatikkoon(laatikko, sisalto, tyhjaa=False):
+    '''
+    Muuten suoraan kopioitu "ikkunasto.py"-funktio, mutta lisäsin
+    rivin "laatikko.yview_moveto('1.0')", jottei käyttäjän tarvitse
+    rullata tekstilaatikon vieritintä nähdäkseen tuoreimman teksilaatikkoon
+    kirjoitetun rivin tekstilaatikon ollessa täynnä.
+    '''
+    laatikko.configure(state="normal")
+    if tyhjaa:
+        try:
+            laatikko.delete(1.0, tk.END)
+        except tk.TclError:
+            pass
+    laatikko.insert(tk.INSERT, sisalto + "\n")
+    laatikko.yview_moveto('1.0')
+    laatikko.configure(state="disabled")
+
+def odottamaton_virhe():
+    '''
+    Odottamattoman poikkeuksen sattuessa printtaa tracebackin
+    tulkkiin ja kommentoi asiasta käyttäjälle.
+    '''
+    print(traceback.format_exc())
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Tapahtui odottamaton virhe", tyhjaa=True)
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Lue lisää manuaalia ja aja ohjelmaa asiallisemmin tai \
+ota yhteys kehittäjään ja ilmoita virheestä :)\n")
+
+def ei_dataa():
+    '''
+    Tarkistaa onko ohjelman muistiin ladattu dataa. Palauttaa False jos on.
+    Palauttaa True ja kertoo siitä käyttäjälle, jos ei ole.
+    '''
+    if not ohjelman_muisti:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Mitään dataa ei ole ladattu ohjelman muistiin.", tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Valitse dataa sisältävä kansio, ja yritä uudelleen.\n")
+        return True
+    return False
+
+
+def laske_parametrit(eka_x, eka_y, toka_x, toka_y):
+    '''
+    Laskee kahden pisteen välisen suoran kulmakertoimen ja vakiotermin.
+    '''
+    kulmakerroin = (toka_y - eka_y) / (toka_x - eka_x)
+    vakiotermi = (toka_x * eka_y - eka_x * toka_y) / (toka_x - eka_x)
+    return kulmakerroin, vakiotermi
+
+
+def lue_data(kansio):
+    '''
+    Lukee kaikki datatiedostot annetusta kansiosta. Ohittaa tiedostot, jotka eivät
+    ole päätteeltään .txt sekä tiedostot, joiden sisältämässä datassa on
+    virheitä. Viallisten tiedostojen nimet ilmoitetaan käyttäjälle.
+    '''
+    ohjelman_muisti.clear()
+    tiedostojen_lkm = 0
+    virheelliset = []
+    for root, kansiot, tiedostot in os.walk(kansio):
+        for tiedosto in tiedostot:
+            if tiedosto.endswith(".txt"):
+                with open(
+                os.path.join(root, tiedosto), "r", encoding="utf-8") as avoin_tiedosto:
+                    rivit = avoin_tiedosto.readlines()
+                tiedostojen_lkm = tiedostojen_lkm + 1
+            else:
+                continue
+            try:
+                for rivi in rivit:
+                    e, i = rivi.split()
+                    e = float(e)
+                    i = float(i)
+                    try:
+                        if e in ohjelman_muisti:
+                            ohjelman_muisti[e] = ohjelman_muisti[e] + i
+                        else:
+                            ohjelman_muisti[e] = i
+                    except KeyError:
+                        ohjelman_muisti[e] = i
+            except (TypeError, ValueError):
+                virheelliset.append(tiedosto)
+                continue
+        return tiedostojen_lkm, virheelliset
+
+
+def avaa_kansio():
+    '''
+    Napinkäsittelijä, joka pyytää käyttäjää valitsemaan kansion avaamalla
+    kansioselaimen. Lataa oikean muotoisen datan valitusta kansiosta ja ilmoittaa käyttöliittymän
+    tekstilaatikkoon montako tiedostoa luettiin sekä virheellisten tiedostojen nimet.
+    '''
+    try:
+        valittu_kansio = ik.avaa_hakemistoikkuna("Directory")
+        tiedostojen_maara, virheelliset_tiedostot = lue_data(valittu_kansio)
+        ladatut_tiedostot = tiedostojen_maara - len(virheelliset_tiedostot)
+        try:
+            if elementit["kuvaaja1"]:
+                ik.poista_elementti(elementit["kehys1"])
+                ik.poista_elementti(elementit["kehys2"])
+                ik.poista_elementti(elementit["kuvaaja1"])
+                ik.poista_elementti(elementit["nappi_jatka"])
+        except (NameError, KeyError):
+            pass
+        except Exception:
+            odottamaton_virhe()
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Ladattiin {} tiedostoa.".format(ladatut_tiedostot), tyhjaa=True)
+        for i in virheelliset_tiedostot:
+            kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+            f"Kansiosta löytynyt viallinen tiedosto: {i}")
+        try:
+            ik.poista_elementti(elementit["nappi_jatka"])
+        except KeyError:
+            pass
+        if ladatut_tiedostot != 0:
+            kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+            "Voit nyt piirtää mittausdatasta kuvaajan sekä suorittaa sille laskutoimintoja.\n")
+        if ladatut_tiedostot == 0:
+            kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+            'Valitse kansio joka sisältää Argonin spektrin mittausdataa ".txt" -muodossa. \n')
+    except (FileNotFoundError, TypeError):
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Tiedostoja ei löytynyt.", tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Yritä uudelleen.\n")
+        try:
+            if elementit["kuvaaja1"]:
+                ik.poista_elementti(elementit["kehys1"])
+                ik.poista_elementti(elementit["kehys2"])
+                ik.poista_elementti(elementit["kuvaaja1"])
+        except (NameError, KeyError):
+            pass
+        return
+    except Exception:
+        odottamaton_virhe()
+        try:
+            if elementit["kuvaaja1"]:
+                ik.poista_elementti(elementit["kehys1"])
+                ik.poista_elementti(elementit["kehys2"])
+                ik.poista_elementti(elementit["kuvaaja1"])
+        except (NameError, KeyError):
+            pass
+        return
+
+
+def piirra_kuvaaja():
+    '''
+    Luo käyttöliittymän, jossa on klikattava kuvaaja. Kuvaajaan
+    piirretään käyrä ohjelman muistissa olevan datan perusteella.
+    '''
+    if ei_dataa():
+        return
+    elementit["x_data"] = list(ohjelman_muisti.keys())
+    elementit["y_data"] = list(ohjelman_muisti.values())
+    try:
+        try:
+            if elementit["kuvaaja1"]:
+                ik.poista_elementti(elementit["kehys1"])
+                ik.poista_elementti(elementit["kehys2"])
+                ik.poista_elementti(elementit["kuvaaja1"])
+        except (NameError, KeyError):
+            pass
+        elementit["kehys1"] = ik.luo_kehys(elementit["ikkuna"], ik.ALA)
+        elementit["kehys2"] = ik.luo_kehys(elementit["ikkuna"], ik.ALA)
+        elementit["kuvaaja1"], elementit["kuvaaja2"], elementit["kuvaaja3"] = ik.luo_kuvaaja(
+        elementit["kehys1"], valitse_datapiste, 700, 700)
+        elementit["kuvaaja3"].set_ylabel('Intensiteetti (yksikkö)')   #y-akselin nimi
+        elementit["kuvaaja3"].set_xlabel('Sidosenergia (eV)')   #x-akselin nimi
+        elementit["kuvaaja3"].set_title('Argonin spektrin mittaustulokset')  #kuvaajan nimi
+        elementit["kuvaaja1"].draw()
+        elementit["kuvaaja3"].plot(elementit["x_data"], elementit["y_data"])
+        ik.kaynnista()
+    except (NameError, KeyError):
+        elementit["kehys1"] = ik.luo_kehys(elementit["ikkuna"], ik.ALA)
+        elementit["kehys2"] = ik.luo_kehys(elementit["ikkuna"], ik.ALA)
+        elementit["kuvaaja1"], elementit["kuvaaja2"], elementit["kuvaaja3"] = \
+        ik.luo_kuvaaja(elementit["kehys1"], valitse_datapiste, 700, 700)
+        elementit["kuvaaja3"].set_ylabel('Intensiteetti (yksikkö)')   #y-akselin nimi
+        elementit["kuvaaja3"].set_xlabel('Sidosenergia (eV)')   #x-akselin nimi
+        elementit["kuvaaja3"].set_title('Argonin spektrin mittaustulokset')  #kuvaajan nimi
+        elementit["kuvaaja1"].draw()
+        elementit["kuvaaja3"].plot(elementit["x_data"], elementit["y_data"])
+        ik.kaynnista()
+
+
+def poista_lineaarinen_tausta_1():
+    '''
+    Poistaa ohjelman muistissa olevasta spektristä lineaarisen taustan
+    ja piirtää uuden kuvaajan vanhan tilalle.
+    Koostuu tämän funktion lisäksi myös jatkofunktioista "lineaarinen_tausta_jatka",
+    "poista_lineaarinen_tausta_2", sekä "lineaarinen_tausta_jatka_2".
+    '''
+    if ei_dataa():
+        return
+    try:
+        if elementit["kuvaaja1"]:
+            pass
+    except (NameError, KeyError):
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Piirrä datasta ensin kuvaaja.\n")
+        return
+    ohjelman_muisti_2["ensimmainen_datapiste"] = []
+    ohjelman_muisti_2["toinen_datapiste"] = []
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Poista spektristä lineaarinen tausta valitsemalla piste spektrin alku-", tyhjaa=True)
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "ja loppupäästä.\n")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Valitse ensimmäinen piste klikkaamalla kuvaajasta.")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Kun olet valinnut haluamasi pisteen, paina "JATKA".\n')
+    try:
+        try:
+            if elementit["nappi_jatka"]:
+                ik.poista_elementti(elementit["nappi_jatka"])
+        except Exception:
+            pass
+        elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+        "                    JATKA                    ", lineaarinen_tausta_jatka)
+    except (NameError, KeyError):
+        elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+        "                    JATKA                    ", lineaarinen_tausta_jatka)
+    except Exception:
+        odottamaton_virhe()
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Käynnistä ohjelma tarvittaessa uudelleen. :)\n")
+        return
+
+
+def lineaarinen_tausta_jatka():
+    '''
+    Jatko-osa 1 'poista_lineaarinen_tausta_1' funktiolle.
+    '''
+    try:
+        ohjelman_muisti_2["ensimmainen_datapiste"] = ohjelman_muisti_2["datapiste"]
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        f'Ensimmäinen valittu piste: {ohjelman_muisti_2["ensimmainen_datapiste"]}\n')
+        poista_lineaarinen_tausta_2()
+    except KeyError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Klikkaa ensin kuvaajasta haluamastasi kohdasta, sitten vasta paina "JATKA".', tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Yritäppä uudelleen painamalla "Poista lineaarinen tausta" -painiketta.')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    except Exception:
+        odottamaton_virhe()
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+
+
+def poista_lineaarinen_tausta_2():
+    '''
+    Jatko-osa 2 'poista_lineaarinen_tausta_1' funktiolle.
+    '''
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Valitse toinen piste klikkaamalla kuvaajasta.")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Kun olet valinnut haluamasi pisteen, paina "JATKA".\n')
+    ik.poista_elementti(elementit["nappi_jatka"])
+    elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+    "                    JATKA                    ", lineaarinen_tausta_jatka_2)
+
+def lineaarinen_tausta_jatka_2():
+    '''
+    Jatko-osa 3 'poista_lineaarinen_tausta_1' funktiolle.
+    '''
+    try:
+        ohjelman_muisti_2["toinen_datapiste"] = ohjelman_muisti_2["datapiste"]
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        f'Toinen valittu piste: {ohjelman_muisti_2["toinen_datapiste"]}\n')
+    except KeyError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Klikkaa ensin kuvaajasta haluamastasi kohdasta, sitten vasta paina "JATKA".', tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Yritäppä uudelleen painamalla "Poista lineaarinen tausta" -painiketta.')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    except Exception:
+        odottamaton_virhe()
+        return
+    try:
+        1 / ((ohjelman_muisti_2["ensimmainen_datapiste"][0]
+        - ohjelman_muisti_2["toinen_datapiste"][0])
+        + (ohjelman_muisti_2["ensimmainen_datapiste"][1]
+        - ohjelman_muisti_2["toinen_datapiste"][1]))
+    except ZeroDivisionError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], "Nämähän ovat yksi ja sama piste")
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], 'Paina "Poista Lineaarinen'
+        'Tausta" -nappia uudelleen ja valitse pisteet spektrin alku- ja loppupäästä.\n')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        ohjelman_muisti_2["ensimmainen_datapiste"] = None
+        ohjelman_muisti_2["toinen_datapiste"] = None
+        return
+    try:
+        1 / (ohjelman_muisti_2["ensimmainen_datapiste"][0]
+        - ohjelman_muisti_2["toinen_datapiste"][0])
+#Ohjelman ei pitäisi ikinä päästä tähän erroriin, mutta käyttäjän toimista kun ei koskaan tiedä :)
+    except ZeroDivisionError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Suora on pystysuora, yhtälöä ei voida laskea")
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Paina Poista Lineaarinen Tausta -nappia uudelleen ja'
+        'valitse pisteet spektrin alku- ja loppupäästä.\n')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        ohjelman_muisti_2["ensimmainen_datapiste"] = None
+        ohjelman_muisti_2["toinen_datapiste"] = None
+        return
+    try:
+        suoran_kulmakerroin, suoran_vakiotermi = \
+        laske_parametrit(ohjelman_muisti_2["ensimmainen_datapiste"][0],
+        ohjelman_muisti_2["ensimmainen_datapiste"][1], ohjelman_muisti_2["toinen_datapiste"][0],
+        ohjelman_muisti_2["toinen_datapiste"][1])
+    except ZeroDivisionError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Suora on pystysuora, yhtälöä ei voida laskea")
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Paina Poista Lineaarinen Tausta -nappia uudelleen ja'
+        'valitse pisteet spektrin alku- ja loppupäästä.\n')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        ohjelman_muisti_2["ensimmainen_datapiste"] = None
+        ohjelman_muisti_2["toinen_datapiste"] = None
+        return
+    for piste in ohjelman_muisti:
+        if suoran_vakiotermi < 0:
+            ohjelman_muisti[piste] = ohjelman_muisti[piste] \
+                - (suoran_kulmakerroin*piste - abs(suoran_vakiotermi))
+        elif suoran_vakiotermi == 0:
+            ohjelman_muisti[piste] = ohjelman_muisti[piste] \
+                - suoran_kulmakerroin*piste
+        elif suoran_vakiotermi > 0:
+            ohjelman_muisti[piste] = ohjelman_muisti[piste] \
+                - (suoran_kulmakerroin * piste + suoran_vakiotermi)
+    ik.poista_elementti(elementit["nappi_jatka"])
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Lineaarinen tausta poistettu.\n', tyhjaa=True)
+    piirra_kuvaaja()
+
+
+
+def valitse_datapiste(event):
+    '''
+    Ottaa vastaan hiiren klikkaustapahtuman ja lukee siitä datapisteen x- ja
+    y-arvot. Arvot tulosteetaan tekstilaatikkoon sekä talletetaan ohjelman
+    muistiin.
+    '''
+    try:
+        x_data = event.xdata
+        y_data = np.interp(x_data, elementit["x_data"], elementit["y_data"])
+        ohjelman_muisti_2["datapiste"] = [x_data, y_data]
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Käyrän arvo pisteessä x = {:.2f} on {:.2f}\n".format(x_data, y_data))
+    except (TypeError, ValueError):
+        print(traceback.format_exc())
+        return
+    except Exception:
+        print(traceback.format_exc())
+        return
+
+
+def laske_intensiteetit_1():
+    '''
+    Ohjeistaa käyttäjää valitsemaan kaksi pistettä kuvaajalta, joiden välinen
+    spektrin intensiteetti lasketaan ja ilmoitetaan käyttäjälle.
+    Koostuu tämän funktion lisäksi myös jatkofunktioista "laske_intensiteetit_jatka",
+    "laske_intensiteetit_2", sekä "laske_intensiteetit_jatka_2"
+    '''
+    if ei_dataa():
+        return
+    try:
+        if elementit["kuvaaja1"]:
+            pass
+    except (NameError, KeyError):
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Piirrä datasta ensin kuvaaja.\n")
+        return
+    ohjelman_muisti_2["ensimmainen_datapiste"] = []
+    ohjelman_muisti_2["toinen_datapiste"] = []
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Laske graafissa näkyvän piikin intensiteetti valitsemalla kahden pisteen ", tyhjaa=True)
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "energiaväli kuvaajasta.\n")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Ohjelma laskee valitun energiavälin intensiteetin pinta-alan")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "käyttäen puolisuunnikassääntöä.\n")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Valitse ensimmäinen piste klikkaamalla kuvaajasta.")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Kun olet valinnut haluamasi pisteen, paina "JATKA".\n')
+    try:
+        try:
+            if elementit["nappi_jatka"]:
+                ik.poista_elementti(elementit["nappi_jatka"])
+        except Exception:
+            pass
+        elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+        "                    JATKA                    ", laske_intensiteetit_jatka)
+    except (NameError, KeyError):
+        elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+        "                    JATKA                    ", laske_intensiteetit_jatka)
+
+
+def laske_intensiteetit_jatka():
+    '''
+    Jatkoa funktiolle "laske_intensiteetit_1"
+    '''
+    try:
+        ohjelman_muisti_2["ensimmainen_datapiste"] = ohjelman_muisti_2["datapiste"]
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        f'Ensimmäinen valittu piste: {ohjelman_muisti_2["ensimmainen_datapiste"]}\n')
+        laske_intensiteetit_2()
+    except KeyError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Klikkaa ensin kuvaajasta haluamastasi kohdasta, sitten vasta paina "JATKA".', tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Yritäppä uudelleen painamalla "Laske piikin intensiteetti" -painiketta.')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    except Exception:
+        odottamaton_virhe()
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+
+
+def laske_intensiteetit_2():
+    '''
+    Jatkoa funktiolle "laske_intensiteetit_1"
+    '''
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    "Valitse toinen piste klikkaamalla kuvaajasta.")
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Kun olet valinnut haluamasi pisteen, paina "JATKA".\n')
+    ik.poista_elementti(elementit["nappi_jatka"])
+    elementit["nappi_jatka"] = ik.luo_nappi(elementit["nappikehys2"],
+    "                    JATKA                    ", laske_intensiteetit_jatka_2)
+
+
+def laske_intensiteetit_jatka_2():
+    '''
+    Jatkoa funktiolle "laske_intensiteetit_1"
+    '''
+    try:
+        ohjelman_muisti_2["toinen_datapiste"] = ohjelman_muisti_2["datapiste"]
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        f'Toinen valittu piste: {ohjelman_muisti_2["toinen_datapiste"]}\n')
+    except KeyError:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Klikkaa ensin kuvaajasta haluamastasi kohdasta, sitten vasta paina "JATKA".', tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        'Yritäppä uudelleen painamalla "Laske piikin intensiteetti" -painiketta.')
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    except Exception:
+        odottamaton_virhe()
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    x_parametrit = []
+    y_parametrit = []
+    if ohjelman_muisti_2["ensimmainen_datapiste"][0] > ohjelman_muisti_2["toinen_datapiste"][0]:
+        for piste in ohjelman_muisti:
+            if ohjelman_muisti_2["ensimmainen_datapiste"][0] >= piste >= \
+            ohjelman_muisti_2["toinen_datapiste"][0]:
+                x_parametrit.append(piste)
+                y_parametrit.append(ohjelman_muisti[piste])
+    elif ohjelman_muisti_2["ensimmainen_datapiste"][0] < ohjelman_muisti_2["toinen_datapiste"][0]:
+        for piste in ohjelman_muisti:
+            if ohjelman_muisti_2["toinen_datapiste"][0] >= piste >= \
+            ohjelman_muisti_2["ensimmainen_datapiste"][0]:
+                x_parametrit.append(piste)
+                y_parametrit.append(ohjelman_muisti[piste])
+    elif ohjelman_muisti_2["ensimmainen_datapiste"][0] == ohjelman_muisti_2["toinen_datapiste"][0]:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], "Taisit valita yhden ja \
+saman pisteen molemmilla kerroilla.")
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Lue lisää manuaalia ja aja ohjelmaa asiallisemmin tai \
+ota yhteys kehittäjään ja ilmoita virheestä :)\n")
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    else:
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], "Tapahtui odottamaton virhe")
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Lue lisää manuaalia ja aja ohjelmaa asiallisemmin tai \
+        ota yhteys kehittäjään ja ilmoita virheestä :)\n")
+        ik.poista_elementti(elementit["nappi_jatka"])
+        return
+    intensiteetti = np.trapz(y_parametrit, x_parametrit)
+    ik.poista_elementti(elementit["nappi_jatka"])
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], f'Ensimmäinen valittu piste: \
+{ohjelman_muisti_2["ensimmainen_datapiste"]}', tyhjaa=True)
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], f'Toinen valittu piste: \
+{ohjelman_muisti_2["toinen_datapiste"]}\n')
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"], f"Valitsemasi energiavälin piikin \
+intensiteetti on: {intensiteetti} yksikköä.\n")
+
+
+def tallenna_kuvaaja():
+    '''
+    Aukaisee hakemistoikkunan, josta käyttäjä voi valita tallennuskohteen ja
+    tallentaa sillä hetkellä näkyvän kuvaajan haluamallaan nimellä ".png" tiedostoksi.
+    '''
+    if ei_dataa():
+        return
+    try:
+        if elementit["kuvaaja1"]:
+            pass
+    except (NameError, KeyError):
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Piirrä datasta ensin kuvaaja.\n")
+        return
+    try:
+        tallennus_polku = tk.filedialog.asksaveasfilename(title="Tallenna Kuvaaja", initialdir=".",
+        defaultextension=".png", filetypes=[("PNG File", "*.png")])
+        plt.rcParams["savefig.directory"] = os.chdir(os.path.dirname(tallennus_polku))
+        tallennus_nimi = tallennus_polku.split("/")[-1]
+        elementit["kuvaaja3"].figure.savefig(tallennus_nimi)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        "Kuvaaja tallennettu kohteeseen: ", tyhjaa=True)
+        kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+        f"{tallennus_polku}")
+    except OSError:
+        return
+    except Exception:
+        odottamaton_virhe()
+        return
+
+
+def main():
+    '''
+    Luo käyttöliittymäikkunan, jossa on vasemmalla kuusi nappia ja oikealla
+    tekstilaatikko.
+    '''
+    elementit["ikkuna"] = ik.luo_ikkuna("Ohjelmoinnin alkeet -lopputyö:\
+    Spektriä pukkaa                                                        \
+                                    by Mikko Lempinen")
+    elementit["nappikehys"] = ik.luo_kehys(elementit["ikkuna"])
+    tyyli = tk.ttk.Style()
+    tyyli.configure('.', background='dark blue')
+
+    erotin1 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin1.pack(side=tk.TOP, fill=tk.NONE, pady=25)
+
+    elementit["nappi1"] = ik.luo_nappi(elementit["nappikehys"], "Valitse datakansio", avaa_kansio)
+    elementit["nappi2"] = ik.luo_nappi(elementit["nappikehys"], "Piirrä datasta kuvaaja",
+    piirra_kuvaaja)
+    elementit["nappi3"] = ik.luo_nappi(elementit["nappikehys"],
+    "   Poista lineaarinen tausta   ", poista_lineaarinen_tausta_1)
+    elementit["nappi4"] = ik.luo_nappi(elementit["nappikehys"],
+    "Laske piikin intensiteetti", laske_intensiteetit_1)
+    #Esteettisyyden vuoksi:
+    #(älä tuijota käyttöliittymäikkunan pisteitä liian kauaa jos OCD)
+    erotin200 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin200.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin201 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin201.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin202 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin202.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin203 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin203.pack(side=tk.TOP, fill=tk.NONE, pady=15)
+    erotin204 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin204.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin205 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin205.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin206 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin206.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin207 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin207.pack(side=tk.TOP, fill=tk.NONE, pady=18)
+    erotin208 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin208.pack(side=tk.TOP, fill=tk.NONE, pady=19)
+    erotin209 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin209.pack(side=tk.TOP, fill=tk.NONE, pady=19)
+    erotin210 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin210.pack(side=tk.TOP, fill=tk.NONE, pady=19)
+
+    elementit["nappi5"] = ik.luo_nappi(elementit["nappikehys"],
+    "Tallenna kuvaaja", tallenna_kuvaaja)
+    elementit["nappi6"] = ik.luo_nappi(elementit["nappikehys"], "Lopeta", ik.lopeta)
+
+    erotin3 = Separator(elementit["nappikehys"], orient="vertical")
+    erotin3.pack(side=tk.TOP, fill=tk.NONE, pady=25)
+
+    elementit["tekstikehys"] = ik.luo_kehys(elementit["ikkuna"])
+    elementit["tekstilaatikko"] = ik.luo_tekstilaatikko(elementit["tekstikehys"])
+
+    erotin4 = Separator(elementit["tekstikehys"], orient="vertical")
+    erotin4.pack(side=tk.TOP, fill=tk.BOTH, pady=10)
+
+    elementit["nappikehys2"] = ik.luo_kehys(erotin203)
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Aloita valitsemalla mittausdataa ".txt" -muodossa sisältävä kansio.')
+    kirjoita_tekstilaatikkoon(elementit["tekstilaatikko"],
+    'Paina "Valitse datakansio" -painikkeesta.')
+    ik.kaynnista()
+
+
+if __name__ == "__main__":
+    main()
