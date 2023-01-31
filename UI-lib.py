@@ -1,5 +1,5 @@
 """
-Yksinkertainen gUI -kirjasto
+Yksinkertaistettu tkinter gUI -kirjasto
 
 """
 
