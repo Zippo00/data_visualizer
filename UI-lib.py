@@ -1,5 +1,5 @@
 """
-Simple UI library
+Yksinkertainen gUI -kirjasto
 
 """
 
