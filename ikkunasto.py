@@ -1,29 +1,6 @@
 """
-ikkunasto - yksinkertainen käyttöliittymäkirjasto
+Simple UI library
 
-@author Mika Oja, Oulun yliopisto
-
-Tämä kirjasto sisältää nipun funktioita, joilla opiskelijat voivat toteuttaa
-yksinkertaisen käyttöliittymän, jossa hyödynnetään matplotlib-kirjastoa
-kuvaajien piirtämiseen. Kirjasto sisältää paljon oletusratkaisuja, jotta
-opiskelijoiden ei tarvitse opetella kokonaista käyttöliittymäkirjastoa, eikä
-paneutua sellaisen yksityiskohtiin. Tästä syystä käyttöliittymien toteutuksessa
-voi kuitenkin tulla rajoja vastaan.
-
-Kirjasto on rakennettu Pythonin mukana tulevan TkInterin päälle. Lisätietoa
-löytyy mm. täältä:
-
-https://docs.python.org/3/library/tk.html
-
-Erityisen huomattavaa on, että Tk hoitaa pääasiassa automaattiseti elementtien
-sijoittelun (perustuen siihen missä kehyksissä ne ovat), mutta kuvaaja- ja
-tekstilaatikoiden koko määritetään staattisesti - niiden ulottuvuudet siis
-sanelevat aika pitkälti miltä käyttöliittymä näyttää. Jos siis haluat
-siistimmän näköisen käyttöliittymän, kannattaa kokeilla säätää näiden kokoja.
-
-Kirjaston pääohjelmasta löydät pienen esimerkkikoodin, josta saat jonkinlaisen
-käsityksen siitä miten tätä kirjastoa käyttämällä luodaan käyttöliittymän
-peruselementtejä.
 """
 
 import tkinter as tk
