@@ -30,7 +30,7 @@ aliohjelmassa piirretään näkyviin. Kuvaajat voi tallentaa .png-muodossa.
 
 
 
-Tarvitut kirjastot: numpy, matplotlib, ikkunasto
+Tarvitut kirjastot: numpy, matplotlib, UI-lib
 
 
 
@@ -42,7 +42,7 @@ import os
 import traceback
 import numpy as np
 from matplotlib import pyplot as plt
-import ikkunasto as ik
+import UI-lib as ik
 
 
 
